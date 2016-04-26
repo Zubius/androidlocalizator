@@ -6,14 +6,18 @@ using System.Xml;
 using System.IO;
 using System.Collections.Generic;
 using System;
+using _ = ru.appforge.utils.U;
 
 public class AndroidLocalizator : EditorWindow {
 
 	static string path = "/Plugins/Android/res/values-{0}/strings.xml";
 	static string dirPath = "/Plugins/Android/res/";
 	static Dictionary<string, string> locals;
-	static Dictionary<string, XmlDocument> docs = new Dictionary<string, XmlDocument>();
+	static Dictionary<string, List<XmlDocument>> docs = new Dictionary<string, List<XmlDocument>>();
+	static Dictionary<XmlDocument, string> docsDirs = new Dictionary<XmlDocument, string>();
 	static Dictionary<string, string> names = new Dictionary<string, string>();
+	static Dictionary<string, string[]> langs = new Dictionary<string, string[]>();
+	static string[] tdirs;
 	static bool isInited = false;
 
 	Vector2 scrollPosition = Vector2.zero;
@@ -21,30 +25,43 @@ public class AndroidLocalizator : EditorWindow {
 	bool resize = false;
 	Rect cursorChangeRect;
 	
-	[MenuItem ("AndroidLocalizator/Localizator")]
+	[MenuItem ("Android Localizator/Localizator")]
 	public static void  ShowWindow () {
 		EditorWindow.GetWindow(typeof(AndroidLocalizator));
 
 		if (!isInited) {
 			InitLocals();
 
-			XmlDocument xd;
-			string docPath;
-
 			try {
 				foreach (var kvp in locals) {
-					xd = new XmlDocument();
-					docPath = Application.dataPath + string.Format(path, kvp.Value);
-					xd.Load(docPath);
-					var xl = xd.SelectNodes("/resources/string[@name='app_name']");
-					if (xl.Count > 0) {
-						names.Add(kvp.Value, xl[0].InnerText);
-					} else {
-						names.Add(kvp.Value, string.Empty);
+					var xds = new List<XmlDocument>();
+//					Debug.LogError(_.ToString(Directory.GetDirectories(Application.dataPath + dirPath, "*-"+kvp.Value+"*")));
+					tdirs = Directory.GetDirectories(Application.dataPath + dirPath, "*-"+kvp.Value+"*");
+
+					langs.AddOrReplace(kvp.Value, tdirs);
+
+					foreach (var lang in tdirs) {
+						var xd = new XmlDocument();
+						var path = lang + "/strings.xml";
+						if (File.Exists(path)) {
+							xd.Load(path);
+							xds.Add(xd);
+							docsDirs.Add(xd, path);
+						} else {
+
+						}
 					}
-					docs.Add(kvp.Value, xd);
-					isInited = true;
+
+					docs.AddOrReplace(kvp.Value, xds);
+
+					var xl = xds[0].SelectNodes("/resources/string[@name='app_name']");
+					if (xl.Count > 0) {
+						names.AddOrReplace(kvp.Value, xl[0].InnerText);
+					} else {
+						names.AddOrReplace(kvp.Value, string.Empty);
+					}
 				}
+				isInited = true;
 			} catch (Exception ex) {
 				Debug.LogException(ex);
 			}
@@ -81,23 +98,51 @@ public class AndroidLocalizator : EditorWindow {
 	void Localize ()
 	{
 		foreach (var kvp in docs) {
-			if (names[kvp.Key].Length > 0) {
-				XmlNodeList nms = kvp.Value.SelectNodes("/resources/string[@name='app_name']");
-				if (nms.Count > 0)
-					nms[0].InnerText = names[kvp.Key];
-				else if (nms.Count == 0) {
-					XmlElement newe = kvp.Value.CreateElement("string");
-					newe.SetAttribute("name","app_name");
-					newe.InnerText = names[kvp.Key];
-					kvp.Value.DocumentElement.AppendChild(newe);
-				}
-			} else {
-				XmlNodeList toRem = kvp.Value.SelectNodes("/resources/string[@name='app_name']");
-				if (toRem.Count > 0) {
-					kvp.Value.DocumentElement.RemoveChild(toRem[0]);
+			foreach (var doc in kvp.Value) {
+//				Debug.LogError(kvp.Key +"   "+doc);
+
+//				if (names[kvp.Key].Length > 0) {
+					XmlNodeList nms = doc.SelectNodes("/resources/string[@name='app_name']");
+					if (nms.Count > 0) {
+						nms[0].InnerText = names[kvp.Key];
+					} else if (nms.Count == 0) {
+						XmlElement newe = doc.CreateElement("string");
+						newe.SetAttribute("name","app_name");
+						newe.InnerText = names[names[kvp.Key].Length > 0 ? kvp.Key : "en"];
+						doc.DocumentElement.AppendChild(newe);
+					}
+//				} else {
+//					XmlNodeList toRem = doc.SelectNodes("/resources/string[@name='app_name']");
+//					if (toRem.Count > 0) {
+//						doc.DocumentElement.RemoveChild(toRem[0]);
+//					}
+//				}
+				doc.Save(docsDirs[doc]);
+			}
+		}
+
+		foreach (var lang in tdirs) {
+			var path = lang + "/strings.xml";
+			if (!File.Exists(path)) {
+				try {
+					var xd = new XmlDocument();
+					var xnr = xd.CreateXmlDeclaration("1.0", "UTF-8", "yes");
+					xd.AppendChild(xnr);
+
+					var xns = xd.CreateElement("resources");
+					xns.SetAttribute("xmlns:android", "http://schemas.android.com/apk/res/android");
+					xd.AppendChild(xns);
+
+					var xnl = xd.CreateElement("string");
+					xnl.SetAttribute("name","app_name");
+					xnl.InnerText = names["en"];
+					xd.DocumentElement.AppendChild(xnl);
+					xd.Save(path);
+					Debug.LogFormat("Created new strings.xml at: {0}", path);
+				} catch (Exception e) {
+					Debug.LogException(e);
 				}
 			}
-			kvp.Value.Save(Application.dataPath + string.Format(path, kvp.Key));
 		}
 	}
 
